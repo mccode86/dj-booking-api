@@ -24,3 +24,15 @@ def add_dj(dj: DJCreate):
     conn.commit()
     conn.close()
     return {"message": "DJ added successfully"}
+
+
+@app.get("/djs")
+def get_djs():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM DJ WHERE active = 1")
+    djs = cursor.fetchall()
+    conn.close()
+    djs = [dict(dj) for dj in djs]
+    return {"djs": djs}
