@@ -16,6 +16,10 @@ class DJCreate(BaseModel):
     price: int
 
 
+class DJUpdate(BaseModel):
+    price: int
+
+
 @app.post("/djs")
 def add_dj(dj: DJCreate):
     conn = sqlite3.connect(DB_PATH)
@@ -36,3 +40,13 @@ def get_djs():
     conn.close()
     djs = [dict(dj) for dj in djs]
     return {"djs": djs}
+
+
+@app.put("/djs/{dj_id}")
+def update_dj(dj_id: int, dj: DJUpdate):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE DJ SET price = ? WHERE id = ?", (dj.price, dj_id))
+    conn.commit()
+    conn.close()
+    return {"message": "DJ's price updated successfully"}
