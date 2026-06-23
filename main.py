@@ -50,3 +50,13 @@ def update_dj(dj_id: int, dj: DJUpdate):
     conn.commit()
     conn.close()
     return {"message": "DJ's price updated successfully"}
+
+
+@app.delete("/djs/{dj_id}")
+def delete_dj(dj_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE DJ SET active = 0 WHERE id = ?", (dj_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "DJ deleted successfully"}
