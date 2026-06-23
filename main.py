@@ -20,6 +20,15 @@ class DJUpdate(BaseModel):
     price: int
 
 
+class OutletCreate(BaseModel):
+    name: str
+    location: str
+
+
+class OutletUpdate(BaseModel):
+    name: str
+
+
 @app.post("/djs")
 def add_dj(dj: DJCreate):
     conn = sqlite3.connect(DB_PATH)
@@ -60,3 +69,45 @@ def delete_dj(dj_id: int):
     conn.commit()
     conn.close()
     return {"message": "DJ deleted successfully"}
+
+
+@app.post("/outlets")
+def add_outlet(outlet: OutletCreate):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO OUTLET (name, location) VALUES (?, ?)", (outlet.name, outlet.location))
+    conn.commit()
+    conn.close()
+    return {"message": "Outlet added successfully"}
+
+
+@app.get("/outlets")
+def get_outlets():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM OUTLET WHERE active = 1")
+    outlets = cursor.fetchall()
+    conn.close()
+    outlets = [dict(outlet) for outlet in outlets]
+    return {"outlets": outlets}
+
+
+@app.put("/outlets/{outlet_id}")
+def update_outlet(outlet_id: int, outlet: OutletUpdate):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE OUTLET SET name = ? WHERE id = ?", (outlet.name, outlet_id))
+    conn.commit()
+    conn.close()
+    return {"message": "Outlet's name updated successfully"}
+
+
+@app.delete("/outlets/{outlet_id}")
+def delete_outlet(outlet_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE OUTLET SET active = 0 WHERE id = ?", (outlet_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "Outlet deleted successfully"}
