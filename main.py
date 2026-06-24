@@ -29,6 +29,12 @@ class OutletUpdate(BaseModel):
     name: str
 
 
+class BookingCreate(BaseModel):
+    dj_id: int
+    outlet_id: int
+    date: str
+
+
 @app.post("/djs")
 def add_dj(dj: DJCreate):
     conn = sqlite3.connect(DB_PATH)
@@ -111,3 +117,19 @@ def delete_outlet(outlet_id: int):
     conn.commit()
     conn.close()
     return {"message": "Outlet deleted successfully"}
+
+
+@app.post("/bookings")
+def book_dj(booking: BookingCreate):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM BOOKING WHERE dj_id = ? AND date = ?", (booking.dj_id, booking.date))
+    book = cursor.fetchall()
+    if book:
+        conn.close()
+        return {"message": "DJ is already booked on this date"}
+    cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)",
+                   (booking.dj_id, booking.outlet_id, booking.date))
+    conn.commit()
+    conn.close()
+    return {"message": "DJ booked successfully"}
