@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 import sqlite3
+
+from oauthlib.openid import connect
+
 from database import DB_PATH
 from pydantic import BaseModel
 
@@ -35,6 +38,10 @@ class BookingCreate(BaseModel):
     date: str
 
 
+class CancelBooking(BaseModel):
+    cancel_reason: str
+
+
 @app.post("/djs")
 def add_dj(dj: DJCreate):
     conn = sqlite3.connect(DB_PATH)
@@ -65,6 +72,8 @@ def update_dj(dj_id: int, dj: DJUpdate):
     conn.commit()
     conn.close()
     return {"message": "DJ's price updated successfully"}
+
+
 
 
 @app.delete("/djs/{dj_id}")
@@ -128,8 +137,29 @@ def book_dj(booking: BookingCreate):
     if book:
         conn.close()
         return {"message": "DJ is already booked on this date"}
-    cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)",
-                   (booking.dj_id, booking.outlet_id, booking.date))
+    cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)", (booking.dj_id, booking.outlet_id, booking.date))
     conn.commit()
     conn.close()
     return {"message": "DJ booked successfully"}
+
+
+@app.get("/bookings")
+def get_bookings():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM BOOKING")
+    bookings = cursor.fetchall()
+    conn.close()
+    bookings = [dict(booking) for booking in bookings]
+    return {"bookings": bookings}
+
+
+@app.put("/bookings/{booking_id}")
+def cancel_booking(booking_id: int, booking: CancelBooking):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE BOOKING SET status = 'Cancelled', cancel_reason = ? WHERE id = ?", (booking.cancel_reason, booking_id))
+    conn.commit()
+    conn.close()
+    return {"message": "DJ's booking cancelled successfully"}
