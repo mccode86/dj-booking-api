@@ -1,9 +1,10 @@
 from fastapi import FastAPI
-import sqlite3
 from database import DB_PATH
 from pydantic import BaseModel
 from anthropic import Anthropic
 from dotenv import load_dotenv
+from database import get_connection
+import sqlite3
 
 load_dotenv()
 
@@ -95,7 +96,7 @@ def run_agent(message):
     while True:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=2084,
+            max_tokens=2048,
             tools=tools,
             messages=messages
         )
@@ -138,7 +139,7 @@ def chat(req: ChatMessage):
 
 @app.post("/djs")
 def add_dj(dj: DJCreate):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("INSERT INTO DJ (name, price) VALUES (?, ?)", (dj.name, dj.price))
     conn.commit()
@@ -148,7 +149,7 @@ def add_dj(dj: DJCreate):
 
 @app.get("/djs")
 def get_djs():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM DJ WHERE active = 1")
@@ -160,7 +161,7 @@ def get_djs():
 
 @app.put("/djs/{dj_id}")
 def update_dj(dj_id: int, dj: DJUpdate):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE DJ SET price = ? WHERE id = ?", (dj.price, dj_id))
     conn.commit()
@@ -170,7 +171,7 @@ def update_dj(dj_id: int, dj: DJUpdate):
 
 @app.delete("/djs/{dj_id}")
 def delete_dj(dj_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE DJ SET active = 0 WHERE id = ?", (dj_id,))
     conn.commit()
@@ -180,7 +181,7 @@ def delete_dj(dj_id: int):
 
 @app.post("/outlets")
 def add_outlet(outlet: OutletCreate):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("INSERT INTO OUTLET (name, location) VALUES (?, ?)", (outlet.name, outlet.location))
     conn.commit()
@@ -190,7 +191,7 @@ def add_outlet(outlet: OutletCreate):
 
 @app.get("/outlets")
 def get_outlets():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM OUTLET WHERE active = 1")
@@ -202,7 +203,7 @@ def get_outlets():
 
 @app.put("/outlets/{outlet_id}")
 def update_outlet(outlet_id: int, outlet: OutletUpdate):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE OUTLET SET name = ? WHERE id = ?", (outlet.name, outlet_id))
     conn.commit()
@@ -212,7 +213,7 @@ def update_outlet(outlet_id: int, outlet: OutletUpdate):
 
 @app.delete("/outlets/{outlet_id}")
 def delete_outlet(outlet_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE OUTLET SET active = 0 WHERE id = ?", (outlet_id,))
     conn.commit()
@@ -222,7 +223,7 @@ def delete_outlet(outlet_id: int):
 
 @app.post("/bookings")
 def book_dj(booking: BookingCreate):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM BOOKING WHERE dj_id = ? AND date = ?", (booking.dj_id, booking.date))
     book = cursor.fetchall()
@@ -238,7 +239,7 @@ def book_dj(booking: BookingCreate):
 
 @app.get("/bookings")
 def get_bookings():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM BOOKING")
@@ -250,7 +251,7 @@ def get_bookings():
 
 @app.put("/bookings/{booking_id}")
 def cancel_booking(booking_id: int, booking: CancelBooking):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE BOOKING SET status = 'Cancelled', cancel_reason = ? WHERE id = ?",
                    (booking.cancel_reason, booking_id))
