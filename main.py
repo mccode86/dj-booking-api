@@ -1,10 +1,15 @@
 from fastapi import FastAPI
 import sqlite3
-
-from oauthlib.openid import connect
-
 from database import DB_PATH
 from pydantic import BaseModel
+from anthropic import Anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = Anthropic()
+
+MODEL = "claude-sonnet-4-6"
 
 app = FastAPI()
 
@@ -42,6 +47,95 @@ class CancelBooking(BaseModel):
     cancel_reason: str
 
 
+class ChatMessage(BaseModel):
+    message: str
+
+
+tools = [{
+    "name": "book_dj",
+    "description": "Book a DJ for a specific date.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "dj_id": {
+                "type": "integer",
+                "description": "ID of the DJ"
+            },
+            "outlet_id": {
+                "type": "integer",
+                "description": "ID of the outlet"
+            },
+            "date": {
+                "type": "string",
+                "description": "Date of the booking"
+            }
+        },
+        "required": ["dj_id", "outlet_id", "date"]
+    }
+}, {
+    "name": "get_djs",
+    "description": "Get a list of all DJs.",
+    "input_schema": {
+        "type": "object",
+        "properties": {}
+    }
+}, {
+    "name": "get_outlets",
+    "description": "Get a list of all outlets.",
+    "input_schema": {
+        "type": "object",
+        "properties": {}
+    }
+}]
+
+
+def run_agent(message):
+    loop_count = 0
+    messages = [{"role": "user", "content": message}]
+    while True:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=2084,
+            tools=tools,
+            messages=messages
+        )
+
+        if response.stop_reason != "tool_use":
+            return response.content[0].text
+
+        messages.append({"role": "assistant", "content": response.content})
+        for block in response.content:
+            if block.type == "tool_use":
+                result = run_tool(block.name, block.input)
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": str(result)
+                    }]
+                })
+        loop_count += 1
+        if loop_count >= 10:
+            return "Sorry, too many loops. Please try again later."
+
+
+def run_tool(tool_name, input_data):
+    if tool_name == "get_djs":
+        return get_djs()
+    elif tool_name == "get_outlets":
+        return get_outlets()
+    elif tool_name == "book_dj":
+        return book_dj(BookingCreate(**input_data))
+    else:
+        return {"error": "Tool not found"}
+
+
+@app.post("/chat")
+def chat(req: ChatMessage):
+    return {"reply": run_agent(req.message)}
+
+
 @app.post("/djs")
 def add_dj(dj: DJCreate):
     conn = sqlite3.connect(DB_PATH)
@@ -72,8 +166,6 @@ def update_dj(dj_id: int, dj: DJUpdate):
     conn.commit()
     conn.close()
     return {"message": "DJ's price updated successfully"}
-
-
 
 
 @app.delete("/djs/{dj_id}")
@@ -137,7 +229,8 @@ def book_dj(booking: BookingCreate):
     if book:
         conn.close()
         return {"message": "DJ is already booked on this date"}
-    cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)", (booking.dj_id, booking.outlet_id, booking.date))
+    cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)",
+                   (booking.dj_id, booking.outlet_id, booking.date))
     conn.commit()
     conn.close()
     return {"message": "DJ booked successfully"}
@@ -159,7 +252,8 @@ def get_bookings():
 def cancel_booking(booking_id: int, booking: CancelBooking):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("UPDATE BOOKING SET status = 'Cancelled', cancel_reason = ? WHERE id = ?", (booking.cancel_reason, booking_id))
+    cursor.execute("UPDATE BOOKING SET status = 'Cancelled', cancel_reason = ? WHERE id = ?",
+                   (booking.cancel_reason, booking_id))
     conn.commit()
     conn.close()
     return {"message": "DJ's booking cancelled successfully"}
