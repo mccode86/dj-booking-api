@@ -1,19 +1,62 @@
-from fastapi import FastAPI
-from fastapi import HTTPException
+import bcrypt
+import sqlite3
+import jwt
+import os
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from database import get_connection
-import sqlite3
-
 
 load_dotenv()
 
 client = Anthropic()
 
 MODEL = "claude-sonnet-4-6"
+TOKEN_SECRET = os.getenv("JWT_SECRET")
 
 app = FastAPI()
+security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
+
+
+def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, TOKEN_SECRET, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+def get_optional_admin(credentials: HTTPAuthorizationCredentials = Depends(optional_security)):
+    if credentials is None:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, TOKEN_SECRET, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+def tools_for_role(role):
+    if role == "admin_dj":
+        allowed = ["book_dj", "get_djs", "get_outlets"]
+    elif role == "admin_outlet":
+        allowed = ["get_djs", "get_outlets"]
+    else:
+        allowed = ["get_djs", "get_outlets"]
+    return [tool for tool in tools if tool["name"] in allowed]
+
+
+
+def require_role(role: str):
+    def checker(admin: dict = Depends(get_current_admin)):
+        if admin["role"] != role:
+            raise HTTPException(status_code=403, detail="Access denied")
+        return admin
+
+    return checker
 
 
 @app.get("/health")
@@ -51,6 +94,11 @@ class CancelBooking(BaseModel):
 
 class ChatMessage(BaseModel):
     message: str
+
+
+class Login(BaseModel):
+    email: str
+    password: str
 
 
 tools = [{
@@ -91,14 +139,15 @@ tools = [{
 }]
 
 
-def run_agent(message):
+def run_agent(message, role):
     loop_count = 0
     messages = [{"role": "user", "content": message}]
+    agent_tools = tools_for_role(role)
     while True:
         response = client.messages.create(
             model=MODEL,
             max_tokens=2048,
-            tools=tools,
+            tools=agent_tools,
             messages=messages
         )
 
@@ -133,12 +182,31 @@ def run_tool(tool_name, input_data):
         return {"error": "Tool not found"}
 
 
+@app.post("/login")
+def login(req: Login):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM ADMIN WHERE email = ?", (req.email,))
+    admin = cursor.fetchone()
+    conn.close()
+    if admin and bcrypt.checkpw(req.password.encode(), admin["password"].encode()):
+        payload = {"id": admin["id"], "role": admin["role"]}
+        token = jwt.encode(payload, TOKEN_SECRET, algorithm="HS256")
+        return {"token": token}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
 @app.post("/chat")
-def chat(req: ChatMessage):
-    return {"reply": run_agent(req.message)}
+def chat(req: ChatMessage, admin: dict | None = Depends(get_optional_admin)):
+    if admin:
+        role = admin["role"]
+    else:
+        role = None
+    return {"reply": run_agent(req.message, role)}
 
 
-@app.post("/djs")
+@app.post("/djs", dependencies=[Depends(require_role("admin_dj"))])
 def add_dj(dj: DJCreate):
     conn = get_connection()
     cursor = conn.cursor()
@@ -160,7 +228,7 @@ def get_djs():
     return {"djs": djs}
 
 
-@app.put("/djs/{dj_id}")
+@app.put("/djs/{dj_id}", dependencies=[Depends(require_role("admin_dj"))])
 def update_dj(dj_id: int, dj: DJUpdate):
     conn = get_connection()
     cursor = conn.cursor()
@@ -173,7 +241,7 @@ def update_dj(dj_id: int, dj: DJUpdate):
     return {"message": "DJ's price updated successfully"}
 
 
-@app.delete("/djs/{dj_id}")
+@app.delete("/djs/{dj_id}", dependencies=[Depends(require_role("admin_dj"))])
 def delete_dj(dj_id: int):
     conn = get_connection()
     cursor = conn.cursor()
@@ -186,7 +254,7 @@ def delete_dj(dj_id: int):
     return {"message": "DJ deleted successfully"}
 
 
-@app.post("/outlets")
+@app.post("/outlets", dependencies=[Depends(require_role("admin_outlet"))])
 def add_outlet(outlet: OutletCreate):
     conn = get_connection()
     cursor = conn.cursor()
@@ -208,7 +276,7 @@ def get_outlets():
     return {"outlets": outlets}
 
 
-@app.put("/outlets/{outlet_id}")
+@app.put("/outlets/{outlet_id}", dependencies=[Depends(require_role("admin_outlet"))])
 def update_outlet(outlet_id: int, outlet: OutletUpdate):
     conn = get_connection()
     cursor = conn.cursor()
@@ -221,7 +289,7 @@ def update_outlet(outlet_id: int, outlet: OutletUpdate):
     return {"message": "Outlet's name updated successfully"}
 
 
-@app.delete("/outlets/{outlet_id}")
+@app.delete("/outlets/{outlet_id}", dependencies=[Depends(require_role("admin_outlet"))])
 def delete_outlet(outlet_id: int):
     conn = get_connection()
     cursor = conn.cursor()
@@ -234,7 +302,7 @@ def delete_outlet(outlet_id: int):
     return {"message": "Outlet deleted successfully"}
 
 
-@app.post("/bookings")
+@app.post("/bookings", dependencies=[Depends(require_role("admin_dj"))])
 def book_dj(booking: BookingCreate):
     conn = get_connection()
     cursor = conn.cursor()
@@ -266,7 +334,7 @@ def get_bookings():
     return {"bookings": bookings}
 
 
-@app.put("/bookings/{booking_id}")
+@app.put("/bookings/{booking_id}", dependencies=[Depends(require_role("admin_dj"))])
 def cancel_booking(booking_id: int, booking: CancelBooking):
     conn = get_connection()
     cursor = conn.cursor()
