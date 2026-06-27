@@ -1,10 +1,11 @@
 from fastapi import FastAPI
-from database import DB_PATH
+from fastapi import HTTPException
 from pydantic import BaseModel
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from database import get_connection
 import sqlite3
+
 
 load_dotenv()
 
@@ -230,8 +231,11 @@ def book_dj(booking: BookingCreate):
     if book:
         conn.close()
         return {"message": "DJ is already booked on this date"}
-    cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)",
-                   (booking.dj_id, booking.outlet_id, booking.date))
+    try:
+        cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)",
+                       (booking.dj_id, booking.outlet_id, booking.date))
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=404, detail="DJ or outlet not found")
     conn.commit()
     conn.close()
     return {"message": "DJ booked successfully"}
