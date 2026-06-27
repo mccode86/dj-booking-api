@@ -165,6 +165,9 @@ def update_dj(dj_id: int, dj: DJUpdate):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE DJ SET price = ? WHERE id = ?", (dj.price, dj_id))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="DJ not found")
     conn.commit()
     conn.close()
     return {"message": "DJ's price updated successfully"}
@@ -175,6 +178,9 @@ def delete_dj(dj_id: int):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE DJ SET active = 0 WHERE id = ?", (dj_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="DJ not found")
     conn.commit()
     conn.close()
     return {"message": "DJ deleted successfully"}
@@ -207,6 +213,9 @@ def update_outlet(outlet_id: int, outlet: OutletUpdate):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE OUTLET SET name = ? WHERE id = ?", (outlet.name, outlet_id))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Outlet not found")
     conn.commit()
     conn.close()
     return {"message": "Outlet's name updated successfully"}
@@ -217,6 +226,9 @@ def delete_outlet(outlet_id: int):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE OUTLET SET active = 0 WHERE id = ?", (outlet_id,))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Outlet not found")
     conn.commit()
     conn.close()
     return {"message": "Outlet deleted successfully"}
@@ -235,6 +247,7 @@ def book_dj(booking: BookingCreate):
         cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)",
                        (booking.dj_id, booking.outlet_id, booking.date))
     except sqlite3.IntegrityError:
+        conn.close()
         raise HTTPException(status_code=404, detail="DJ or outlet not found")
     conn.commit()
     conn.close()
@@ -259,6 +272,9 @@ def cancel_booking(booking_id: int, booking: CancelBooking):
     cursor = conn.cursor()
     cursor.execute("UPDATE BOOKING SET status = 'Cancelled', cancel_reason = ? WHERE id = ?",
                    (booking.cancel_reason, booking_id))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Booking not found")
     conn.commit()
     conn.close()
     return {"message": "DJ's booking cancelled successfully"}
