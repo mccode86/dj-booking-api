@@ -4,8 +4,8 @@
 > *way of thinking*, not the syntax. Deliberately **no code**. Every box has an
 > **"Under the hood"** note so the reasoning is reusable in the next project.
 >
-> **Status:** data model ✅ + operations / endpoints ✅ designed. The Create-Booking
-> flow detail is being finalized. **Build (coding) = next.**
+> **Status:** core CRUD + business rule ✅ built & tested · AI agent layer ✅ built ·
+> **Auth (login + roles) 📐 designed 2026-06-27 — build next.**
 
 **Goal:** an outlet (a Holywings club) wants a specific DJ to play on a specific
 date. The system records the booking — but only if that DJ is still free on that
@@ -23,9 +23,10 @@ of backend most jobs actually are, not just AI/RAG.)
 |---|---|---|
 | **1 — Data model** | Decide the tables, columns, relationships (the *nouns*). | ✅ done |
 | **2 — Operations** | Decide the endpoints / what the system can *do* (the *verbs*). | ✅ done (Create-Booking flow being finalized) |
-| **3 — Build** | Code it: project setup → create tables → seed / prepare data → implement endpoints → tests. | ⏳ next |
-| **Later — Auth** | Login + roles (admin vs outlet), as a layer ON TOP. | 🔒 deferred |
-| **Later — LLM** | Optional AI on top (see Future section). | 🔮 optional |
+| **3 — Build** | Code it: project setup → create tables → seed / prepare data → implement endpoints → tests. | ✅ done |
+| **4 — AI layer** | NL `/chat` → agent (tool use) wrapping the endpoints. | ✅ done |
+| **5 — Auth** | Login + roles (admin vs outlet), a layer ON TOP. | 📐 designed — build next |
+| **Later — LLM extras** | More AI features (Q&A, reschedule suggestions). | 🔮 optional |
 
 > Principle: **design early, implement late.** Design the whole thing first, then
 > code top-to-bottom (dependencies already resolved). Auth & LLM are *layers on
@@ -211,6 +212,85 @@ Receives `dj_id`, `outlet_id`, `date`. High level:
 
 Notice how short this list is vs the capstone: **no Chroma, no embeddings, no
 LLM.** That's the whole point — this is a *plain* backend.
+
+---
+
+## 🔐 Auth — login + roles  📐 designed 2026-06-27 (build next)
+
+> Designed via Socratic interview. The API currently has **no auth** — anyone can
+> book / cancel / delete. Add **authentication** (who are you?) + **authorization**
+> (what may you do?) as a layer ON TOP of the working core. Planned from day one
+> ("design early, implement late").
+
+### Roles — **role-based access control (RBAC)**
+Three audiences, not just "logged in / out":
+| Audience | May do |
+|---|---|
+| **Public** (no login) | **read only**: list DJs, list outlets, view bookings |
+| **Admin — DJ management** | add / update / delete DJ · **create** booking · cancel booking |
+| **Admin — Outlet** | add / update / delete outlet |
+
+*Under the hood:* `update DJ price` and `create booking` belong to DJ management
+(decided explicitly — they were the easy-to-miss ones). Outlet admins touch outlets
+only.
+
+### The non-obvious decision — **no public sign-up**
+You **never** let someone choose their own privileged role (everyone would pick
+"admin DJ" → auth becomes meaningless). The **2 admin accounts are fixed**,
+identified by **email**, and provisioned by whoever runs the system — they can't be
+added to. → **Seed them**, exactly like `seed.py` does for DJs/outlets: the `ADMIN`
+table *structure* lives in `database.py` (`CREATE TABLE`), the 2 *rows* in
+`seed.py` (`INSERT`).
+
+*Under the hood:* role assignment must come from a **trusted source, never the
+user's own claim.** For a tiny fixed set, seeding beats a "super-admin creates
+admins" endpoint — simpler, zero extra attack surface. Add super-admin later only
+if the set must grow (**YAGNI**).
+
+### Table: `ADMIN`  (same shape as `DJ` — id + attributes)
+| column | note |
+|---|---|
+| `id` | primary key |
+| `email` | **unique** login id — just a string; **not** wired to real email sending |
+| `password` | stored **HASHED**, never plaintext |
+| `role` | `dj_management` or `outlet` (the "wristband colour") |
+
+### Authentication — the **token** (wristband analogy)
+HTTP is **stateless** — the server doesn't remember you between requests (same shape
+as Stage 7.6: the LLM has no memory, you resend the whole history each call). So
+each request must **carry proof**:
+1. Login once (email + password) → server verifies → returns a **token**.
+2. Every later request **carries that token** (in a header).
+3. Server reads the token → knows the **role** → allows / denies.
+
+The role rides **inside** the token (VIP vs regular wristband).
+
+### Password **hashing**
+Never store the raw password. Store a **one-way hash** (blender: steak → mince is
+easy, mince → steak is impossible). At login, hash what they just typed and
+**compare the hashes** — the original is never needed. If the DB is stolen, only
+useless hashes leak. (A library does the hashing; you don't write the algorithm.)
+
+### `/chat` — closing the AI back-door
+The agent can only call the tools you **hand** it → **filter the tools list
+per-request by role:**
+| Caller | Tools given |
+|---|---|
+| Public (no login) | read only: `get_djs`, `get_outlets`, `get_bookings` → **cannot** book |
+| DJ management | the above **+ `book_dj`** |
+
+*Under the hood:* the agent's power = the tools given to it; scope that list by who
+is asking. (`get_bookings` tool isn't built yet — add during build.)
+
+### Still fuzzy — settle at build time (design-meets-code)
+- **How the token is made & verified** — the **JWT** standard (a *signed* token).
+- **How each endpoint checks it** — FastAPI's **dependency** pattern (`Depends`).
+
+### Build order (dependency-first)
+1. `ADMIN` table (`database.py`) + **seed 2 admins** (`seed.py`, hashed passwords).
+2. **Login** endpoint → verify hash → issue token.
+3. **Protect** endpoints → check token + role (dependency).
+4. **Filter `/chat` tools** by role (+ add the `get_bookings` tool).
 
 ---
 

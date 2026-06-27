@@ -7,6 +7,14 @@ DB_PATH = BASE_DIR / "dj_booking.db"
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
+
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS ADMIN (
+    id INTEGER PRIMARY KEY,
+    role TEXT,
+    email TEXT UNIQUE,
+    password TEXT)""")
+
     conn.execute("""
     CREATE TABLE IF NOT EXISTS DJ (
     id INTEGER PRIMARY KEY,
