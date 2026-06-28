@@ -1,4 +1,4 @@
-# 🗺️ Architecture - DJ Booking API
+# Architecture - DJ Booking API
 
 > A reference for myself. This is the **sketch made before writing any code** - the
 > *way of thinking*, not the syntax. Deliberately **no code**. Every box has an
@@ -19,7 +19,7 @@ of backend most jobs actually are, not just AI/RAG.)
 
 ---
 
-## 🧭 Phase roadmap (what we do, in order)
+## Phase roadmap (what we do, in order)
 
 | Phase | What we do | Status |
 |---|---|---|
@@ -191,7 +191,7 @@ Outlet) or that *is* history (Booking) is **never hard-deleted** - you flip a fl
 (`active = false`, or `status = Cancelled / Done`). The row stays, so foreign keys
 & reports never break. Same root insight as Phase 1's "Booking table is permanent."
 
-### ⭐ Create Booking - the flow  ✅ built & verified
+### Create Booking - the flow  ✅ built & verified
 Receives `dj_id`, `outlet_id`, `date`. High level:
 1. **Availability check FIRST** - is there already a booking row for this
    `(dj_id, date)`? (a row of *any* status counts as taken).
@@ -217,7 +217,7 @@ LLM.** That's the whole point - this is a *plain* backend.
 
 ---
 
-## 🔐 Auth - login + roles  ✅ built 2026-06-27
+## Auth - login + roles  ✅ built 2026-06-27
 
 > Designed via Socratic interview, then built. **Authentication** (who are you?) +
 > **authorization** (what may you do?) sit as a layer ON TOP of the working core:
@@ -296,7 +296,7 @@ is asking. (`get_bookings` tool ✅ built - public can call it too, mirroring th
 
 ---
 
-## 🤖 The LLM layer ON TOP - ✅ built
+## The LLM layer ON TOP - ✅ built
 
 Built *after* the plain backend (that ordering was the whole point: solid deterministic
 core first, AI later). The agent sits ON TOP and only translates language into calls to
@@ -315,7 +315,7 @@ into calls to the existing API - the **tool use / function calling** pattern
 (Stage 10). The AI may be flaky; the core stays deterministic and trustworthy.
 
 **Candidate features:**
-1. ⭐ **Natural-language booking** ✅ **built** - outlet types *"book DJ Andre next
+1. **Natural-language booking** ✅ **built** - outlet types *"book DJ Andre next
    Saturday night"* -> the agent finds the ids (`get_djs`/`get_outlets`) and calls
    `book_dj`; the *backend* runs the availability check. (Pydantic + tool use.)
 2. **Q&A assistant over the data** ✅ **built** - *"which bookings are on the 11th?"* ->
@@ -327,11 +327,11 @@ into calls to the existing API - the **tool use / function calling** pattern
 
 ## ❌ Deliberately NOT decided at the sketch stage
 Syntax, function / endpoint names, exact column types, exact arguments. Handled
-**while coding** (docs / AI / autocomplete). The "high-pass at 100hz" details.
+**while coding**.
 
 ---
 
-## 🧩 Pattern-library entry
+## Pattern-library entry
 This is the **CRUD + business-rule** pattern. Swap "DJ booking" for "hotel rooms",
 "appointment slots", or "equipment rental" and the skeleton is identical: a few
 **entities** + a **junction table** for the events + **one rule that guards
