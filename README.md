@@ -183,15 +183,15 @@ pytest
 
 ```
 dj_booking_api/
-├── main.py            # FastAPI app, organized by concern:
-│                      #   setup -> models -> auth -> agent -> endpoints
-├── database.py        # DB path + schema + get_connection() (FK enforcement)
-├── seed.py            # loads 2 admins + sample DJs/outlets
-├── test_main.py       # pytest (availability guard)
-├── data/
-│   └── seed-data.json # 30 DJs + 60 outlets
-├── requirements.txt
-└── ARCHITECTURE.md    # data model, endpoint, agent & auth design notes
+|-- main.py            # FastAPI app, organized by concern:
+|                      #   setup -> models -> auth -> agent -> endpoints
+|-- database.py        # DB path + schema + get_connection() (FK enforcement)
+|-- seed.py            # loads 2 admins + sample DJs/outlets
+|-- test_main.py       # pytest (availability guard)
+|-- data/
+|   `-- seed-data.json # 30 DJs + 60 outlets
+|-- requirements.txt
+`-- ARCHITECTURE.md    # data model, endpoint, agent & auth design notes
 ```
 
 ---

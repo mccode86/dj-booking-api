@@ -5,7 +5,7 @@ __pycache__/
 # Virtual environment
 .venv/
 
-# Database (derived data — rebuilt from code)
+# Database (derived data - rebuilt from code)
 *.db
 
 # Environment secrets
