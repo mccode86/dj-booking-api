@@ -27,6 +27,8 @@ Built with **FastAPI + SQLite + Pydantic + Anthropic (Claude) + JWT**. No fronte
 - **Tool use + chaining**: every endpoint is exposed as a tool; to book by name, the agent first calls `get_djs` to find the ID, then `book_dj`
 - **Honest by design**: a system prompt stops the agent from pretending to do things it has no tool for; it refuses clearly and says what it *can* do instead
 - **Safe agent loop**: handles every `stop_reason` plus a hard iteration cap, so it can't run away
+- **Conversation memory**: `/chat` is stateful per `conversation_id`, so the agent remembers earlier turns in the same conversation. Omit the id on the first message and the server generates one (returned in the response) for the client to reuse on follow-ups
+- **Confirms before changing data**: before any create/update/delete/cancel, the agent restates exactly what it's about to do (the specific record, by name and id) and waits for an explicit "yes", so a name typo can't silently hit the wrong record
 
 **Auth & access control (RBAC)**
 
@@ -107,7 +109,7 @@ Four tables in one SQLite database:
 |--------|------|------|-------------|
 | `GET` | `/health` | public | Health check |
 | `POST` | `/login` | public | Log in, returns a JWT (valid 30 min) |
-| `POST` | `/chat` | public* | Natural-language agent (tools filtered by the caller's role) |
+| `POST` | `/chat` | public* | Natural-language agent (stateful per `conversation_id`); tools filtered by the caller's role |
 | `POST` | `/djs` | admin_dj | Create a DJ |
 | `GET` | `/djs` | public | List active DJs |
 | `PUT` | `/djs/{dj_id}` | admin_dj | Update a DJ's price |
@@ -130,6 +132,8 @@ Four tables in one SQLite database:
 - **History is permanent.** Nothing is ever hard-deleted. DJs and outlets are soft-deleted (`active = 0`), and bookings are soft-cancelled (`status = 'Cancelled'`). A cancelled booking keeps its row, so the availability check still finds it, and re-booking that DJ on a cancelled date is still rejected, matching the real venue rule.
 - **The agent never touches the database directly.** `/chat` only translates language into tool calls; each tool maps to an existing endpoint function. The agent runs in a loop (call a tool, read the result, decide the next step) until it has an answer.
 - **The agent is never a back-door.** The tools handed to the agent are filtered by the caller's role, mirroring the HTTP permissions exactly. A not-logged-in user literally has *no* booking tool, so even if the model "talks" like it booked, the database stays untouched. Security lives in the **tool filter (hard layer)**; the **system prompt (soft layer)** only shapes honest messaging.
+- **The agent remembers the conversation.** Each `/chat` request carries a `conversation_id`; the server keeps that conversation's message history and replays it on the next call, so follow-up questions have context. History is stored per id, so separate conversations never bleed into each other. Send no id on the first message and the server mints one, returned in the response for the client to reuse.
+- **It confirms before changing data.** Before any create/update/delete/cancel, the system prompt makes the agent restate exactly what it's about to do (naming the exact record by name and id) and act only after an explicit confirmation. If the request is ambiguous (e.g. two similar names), it lists the candidates instead of guessing. (This is a soft layer for *messaging*; the real security stays in the role-based tool filter.)
 - **Tokens expire.** JWTs carry a 30-minute `exp` claim; PyJWT rejects expired tokens automatically, so a leaked or stale token stops working on its own.
 
 ---
@@ -195,7 +199,5 @@ dj_booking_api/
 ## Possible improvements
 
 - A token **refresh** flow so users don't have to re-login every 30 minutes
-- **Conversation memory** for `/chat` (currently each call is stateless)
-- **Confirmation step before destructive agent actions** (delete/cancel): the agent echoes the matched record (name + id) and waits for a "yes", so a name typo can't silently hit the wrong record (builds on conversation memory above)
 - Automated tests for the agent / auth layers (the deterministic guard is covered; the LLM agent isn't)
 - Pagination + filtering on the list endpoints as data grows

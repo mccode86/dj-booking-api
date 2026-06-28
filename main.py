@@ -1,3 +1,4 @@
+import uuid
 import bcrypt
 import sqlite3
 import jwt
@@ -21,6 +22,7 @@ TOKEN_SECRET = os.getenv("JWT_SECRET")
 app = FastAPI()
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
+conversation_history = {}
 
 
 class DJCreate(BaseModel):
@@ -53,6 +55,7 @@ class CancelBooking(BaseModel):
 
 class ChatMessage(BaseModel):
     message: str
+    conversation_id: str | None = None
 
 
 class Login(BaseModel):
@@ -279,15 +282,17 @@ def run_tool(tool_name, input_data):
         return {"error": "Tool not found"}
 
 
-def run_agent(message, role):
+def run_agent(message, role, history):
     loop_count = 0
     messages = [{"role": "user", "content": message}]
     agent_tools = tools_for_role(role)
     system_prompt = f"""You are the assistant for the Holywings DJ booking system.
-    
+
 Rules:
 - Only use the tools that are available to you. Never claim or pretend you can perform an action if no tool exists for it.
 - If you can't do something, say so honestly, and tell the user what you CAN do instead.
+- Before calling any tool that creates, updates, or deletes data, you must first restate exactly what you are about to do, including the specific target by name AND id (e.g. "I'm about to mark DJ 'Andre' (id: 1) as deleted. Confirm?"). If the user's request is ambiguous about which record they mean (e.g. multiple similarly-named DJs), do not guess; list the candidates and ask which one. Only call the tool after the user gives a clear, explicit confirmation (e.g. "yes", "confirm", "go ahead"). A vague or non-committal reply does not count as confirmation; ask again.
+- Read-only actions (viewing, listing, searching, checking availability) do not require confirmation and can be called directly.
 
 The current user's role is {role}.
 """
@@ -297,11 +302,12 @@ The current user's role is {role}.
             max_tokens=2048,
             tools=agent_tools,
             system=system_prompt,
-            messages=messages
+            messages=history + messages,
         )
 
         if response.stop_reason != "tool_use":
-            return response.content[0].text
+            messages.append({"role": "assistant", "content": response.content})
+            return response.content[0].text, history + messages
 
         messages.append({"role": "assistant", "content": response.content})
         for block in response.content:
@@ -317,7 +323,7 @@ The current user's role is {role}.
                 })
         loop_count += 1
         if loop_count >= 10:
-            return "Sorry, too many loops. Please try again later."
+            return "Sorry, too many loops. Please try again later.", history + messages
 
 
 @app.get("/health")
@@ -342,11 +348,18 @@ def login(req: Login):
 
 @app.post("/chat")
 def chat(req: ChatMessage, admin: dict | None = Depends(get_optional_admin)):
+    if req.conversation_id is None:
+        conversation_id = str(uuid.uuid4())
+    else:
+        conversation_id = req.conversation_id
+    history = conversation_history.get(conversation_id, [])
     if admin:
         role = admin["role"]
     else:
         role = None
-    return {"reply": run_agent(req.message, role)}
+    reply, updated_history = run_agent(req.message, role, history)
+    conversation_history[conversation_id] = updated_history
+    return {"reply": reply, "conversation_id": conversation_id}
 
 
 @app.post("/djs", dependencies=[Depends(require_role("admin_dj"))])
