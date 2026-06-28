@@ -1,21 +1,40 @@
 # DJ Booking API
 
-A backend REST API for managing DJ bookings across multiple venues — built around a real-world scenario: an outlet wants to book a DJ for a specific date, and the system has to make sure that DJ isn't already booked that night.
+A backend REST API for managing DJ bookings across multiple venues, built around a real-world scenario (Holywings): an outlet wants to book a DJ for a specific date, and the system has to make sure that DJ isn't already booked that night.
 
-Built with **FastAPI + SQLite + Pydantic**. No frontend — this is an API-only backend, fully explorable through the auto-generated Swagger UI at `/docs`.
+Beyond the CRUD booking core, it has two more layers, planned from the start and built in phases:
 
-> A non-AI backend project: plain CRUD plus one real business rule (availability check). Built to round out a portfolio beyond AI/LLM work.
+- an **AI agent** (`/chat`) that turns natural language into real API actions via Claude tool-use, and
+- **JWT auth + role-based access control (RBAC)** so only the right people (or the right agent) can change data.
+
+Built with **FastAPI + SQLite + Pydantic + Anthropic (Claude) + JWT**. No frontend; it's API-only, fully explorable through the auto-generated Swagger UI at `/docs`.
 
 ---
 
 ## Features
 
-- **DJ management** — create, list, update price, soft-delete
-- **Outlet management** — create, list, update name, soft-delete
-- **Bookings** with an **availability guard** — a DJ can't be double-booked on the same date
-- **Soft-delete** everywhere — DJs/Outlets are marked inactive, never physically removed, so existing booking history never breaks
-- **Soft-cancel** for bookings — a cancelled booking keeps its row (with a reason); the date stays blocked, mirroring the real "cancellations are day-of, the slot is gone" rule
-- **Seed script** — loads 30 DJs and 60 outlets from a JSON file for instant test data
+**Core booking system**
+
+- **DJ management**: create, list, update price, soft-delete
+- **Outlet management**: create, list, update name, soft-delete
+- **Bookings** with an **availability guard**: a DJ can't be double-booked on the same date
+- **Soft-delete / soft-cancel everywhere**: rows are marked inactive/cancelled, never physically removed, so booking history never breaks (a cancelled date stays blocked, mirroring the real "same-day cancellations don't free the slot" rule)
+- **Seed script**: loads 2 admins, 30 DJs, and 60 outlets for instant test data
+
+**AI agent layer**
+
+- **`/chat` natural-language endpoint**: talk to the system in plain English ("book DJ Rayhan at Lights Senayan on 2026-07-02") and the agent calls the right endpoints for you
+- **Tool use + chaining**: every endpoint is exposed as a tool; to book by name, the agent first calls `get_djs` to find the ID, then `book_dj`
+- **Honest by design**: a system prompt stops the agent from pretending to do things it has no tool for; it refuses clearly and says what it *can* do instead
+- **Safe agent loop**: handles every `stop_reason` plus a hard iteration cap, so it can't run away
+
+**Auth & access control (RBAC)**
+
+- **JWT login** (`/login`) with **bcrypt-hashed** passwords
+- **Two admin roles**: `admin_dj` (DJ + booking management) and `admin_outlet` (outlet management); all reads are public
+- **Role-protected endpoints** via FastAPI dependencies
+- **Per-role agent tools**: the `/chat` agent only receives the tools the caller's role is allowed, so it can't be used as a back-door around the HTTP permissions
+- **Token expiry**: login tokens expire after 30 minutes
 
 ---
 
@@ -25,7 +44,10 @@ Built with **FastAPI + SQLite + Pydantic**. No frontend — this is an API-only 
 |-------|--------|
 | Web framework | FastAPI |
 | Validation | Pydantic (request bodies) |
-| Database | SQLite (raw `sqlite3`, parameterized queries) |
+| Database | SQLite (raw `sqlite3`, parameterized queries, foreign keys enforced) |
+| AI agent | Anthropic SDK (Claude `claude-sonnet-4-6`), tool use |
+| Auth | PyJWT (HS256) + bcrypt (password hashing) |
+| Tests | pytest |
 | Server | Uvicorn |
 | Language | Python 3.12 |
 
@@ -33,9 +55,19 @@ Built with **FastAPI + SQLite + Pydantic**. No frontend — this is an API-only 
 
 ## Data model
 
-Three tables in one SQLite database:
+Four tables in one SQLite database:
+
+**ADMIN**
+
+| column | type | notes |
+|--------|------|-------|
+| `id` | INTEGER | primary key (auto) |
+| `role` | TEXT | `admin_dj` or `admin_outlet` |
+| `email` | TEXT | unique login id |
+| `password` | TEXT | bcrypt hash (never stored in plaintext) |
 
 **DJ**
+
 | column | type | notes |
 |--------|------|-------|
 | `id` | INTEGER | primary key (auto) |
@@ -44,6 +76,7 @@ Three tables in one SQLite database:
 | `active` | INTEGER | `1` = active, `0` = soft-deleted (default `1`) |
 
 **OUTLET**
+
 | column | type | notes |
 |--------|------|-------|
 | `id` | INTEGER | primary key (auto) |
@@ -52,43 +85,52 @@ Three tables in one SQLite database:
 | `active` | INTEGER | `1` = active, `0` = soft-deleted (default `1`) |
 
 **BOOKING**
+
 | column | type | notes |
 |--------|------|-------|
 | `id` | INTEGER | primary key (auto) |
-| `dj_id` | INTEGER | foreign key → `DJ(id)` |
-| `outlet_id` | INTEGER | foreign key → `OUTLET(id)` |
+| `dj_id` | INTEGER | foreign key -> `DJ(id)` |
+| `outlet_id` | INTEGER | foreign key -> `OUTLET(id)` |
 | `date` | TEXT | ISO date, e.g. `2026-07-05` |
 | `status` | TEXT | `Booked` (default) or `Cancelled` |
 | `cancel_reason` | TEXT | filled only when cancelled, otherwise `null` |
 
-> **Design note:** a DJ's *availability* is never stored as a column. It's **derived** at request time by checking whether a booking row already exists for that DJ on that date — a single source of truth that can't drift out of sync.
+> **Design note:** a DJ's *availability* is never stored as a column. It's **derived** at request time by checking whether a booking row already exists for that DJ on that date: a single source of truth that can't drift out of sync.
 
 ---
 
 ## API endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check |
-| `POST` | `/djs` | Create a DJ |
-| `GET` | `/djs` | List active DJs |
-| `PUT` | `/djs/{dj_id}` | Update a DJ's price |
-| `DELETE` | `/djs/{dj_id}` | Soft-delete a DJ (`active = 0`) |
-| `POST` | `/outlets` | Create an outlet |
-| `GET` | `/outlets` | List active outlets |
-| `PUT` | `/outlets/{outlet_id}` | Update an outlet's name |
-| `DELETE` | `/outlets/{outlet_id}` | Soft-delete an outlet (`active = 0`) |
-| `POST` | `/bookings` | Create a booking — **rejected if the DJ is already booked that date** |
-| `GET` | `/bookings` | List all bookings (including cancelled — full history) |
-| `PUT` | `/bookings/{booking_id}` | Cancel a booking (sets status to `Cancelled` + records a reason) |
+`Auth` shows who may call each endpoint. Reads are public; writes require a JWT for the matching role.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | public | Health check |
+| `POST` | `/login` | public | Log in, returns a JWT (valid 30 min) |
+| `POST` | `/chat` | public* | Natural-language agent (tools filtered by the caller's role) |
+| `POST` | `/djs` | admin_dj | Create a DJ |
+| `GET` | `/djs` | public | List active DJs |
+| `PUT` | `/djs/{dj_id}` | admin_dj | Update a DJ's price |
+| `DELETE` | `/djs/{dj_id}` | admin_dj | Soft-delete a DJ (`active = 0`) |
+| `POST` | `/outlets` | admin_outlet | Create an outlet |
+| `GET` | `/outlets` | public | List active outlets |
+| `PUT` | `/outlets/{outlet_id}` | admin_outlet | Update an outlet's name |
+| `DELETE` | `/outlets/{outlet_id}` | admin_outlet | Soft-delete an outlet (`active = 0`) |
+| `POST` | `/bookings` | admin_dj | Create a booking (**rejected if the DJ is already booked that date**) |
+| `GET` | `/bookings` | public | List all bookings (including cancelled, for full history) |
+| `PUT` | `/bookings/{booking_id}` | admin_dj | Cancel a booking (sets `Cancelled` + records a reason) |
+
+\* `/chat` is open to everyone, but the agent's available tools are filtered by the caller's role, so an anonymous user only gets the read tools.
 
 ---
 
-## How it works — key design decisions
+## How it works
 
 - **No double-booking.** Before inserting a booking, the API checks for an existing row matching that `dj_id` + `date`. If one exists, the request is rejected; otherwise the booking is created. The check always runs *before* the insert.
-- **History is permanent.** Nothing is ever hard-deleted. DJs and outlets are soft-deleted (`active = 0`), and bookings are soft-cancelled (`status = 'Cancelled'`). This keeps every past booking intact and referenceable.
-- **A cancelled date stays blocked.** Because a cancelled booking keeps its row, the availability check still finds it — so re-booking the same DJ on a cancelled date is still rejected. This matches the real venue rule where same-day cancellations don't free the slot.
+- **History is permanent.** Nothing is ever hard-deleted. DJs and outlets are soft-deleted (`active = 0`), and bookings are soft-cancelled (`status = 'Cancelled'`). A cancelled booking keeps its row, so the availability check still finds it, and re-booking that DJ on a cancelled date is still rejected, matching the real venue rule.
+- **The agent never touches the database directly.** `/chat` only translates language into tool calls; each tool maps to an existing endpoint function. The agent runs in a loop (call a tool, read the result, decide the next step) until it has an answer.
+- **The agent is never a back-door.** The tools handed to the agent are filtered by the caller's role, mirroring the HTTP permissions exactly. A not-logged-in user literally has *no* booking tool, so even if the model "talks" like it booked, the database stays untouched. Security lives in the **tool filter (hard layer)**; the **system prompt (soft layer)** only shapes honest messaging.
+- **Tokens expire.** JWTs carry a 30-minute `exp` claim; PyJWT rejects expired tokens automatically, so a leaked or stale token stops working on its own.
 
 ---
 
@@ -97,21 +139,39 @@ Three tables in one SQLite database:
 ```bash
 # 1. clone, then create + activate a virtual environment
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
 # 2. install dependencies
 pip install -r requirements.txt
 
-# 3. create the tables and load sample data (30 DJs, 60 outlets)
+# 3. create a .env file with your secrets
+#    ANTHROPIC_API_KEY=sk-ant-...
+#    JWT_SECRET=any-long-random-string
+#    ADMIN_DJ_PASSWORD=...
+#    ADMIN_OUTLET_PASSWORD=...
+
+# 4. create the tables and load sample data (2 admins, 30 DJs, 60 outlets)
 python seed.py
 
-# 4. start the server
-uvicorn main:app --reload
+# 5. start the server
+python -m uvicorn main:app --reload
 ```
 
-Then open **http://localhost:8000/docs** to explore and try every endpoint interactively.
+Then open **http://localhost:8000/docs** to explore every endpoint interactively.
 
-> The SQLite database (`*.db`) is git-ignored — it's derived data, rebuilt from `database.py` + `seed.py` on first run.
+**Trying protected actions / the agent:**
+
+1. `POST /login` with a seeded admin (`hwadmin.dj@gmail.com` or `hwadmin.outlet@gmail.com`, password = whatever you set in `.env`), then copy the returned token.
+2. Click **Authorize** in Swagger and paste the token.
+3. Now write endpoints and the role-aware `/chat` agent unlock for that role.
+
+**Run the tests:**
+
+```bash
+pytest
+```
+
+> The SQLite database (`*.db`) is git-ignored: it's derived data, rebuilt from `database.py` + `seed.py` on first run.
 
 ---
 
@@ -119,19 +179,23 @@ Then open **http://localhost:8000/docs** to explore and try every endpoint inter
 
 ```
 dj_booking_api/
-├── main.py            # FastAPI app + all endpoints
-├── database.py        # DB path + schema (CREATE TABLE), runs on import
-├── seed.py            # loads sample DJs/outlets from data/seed-data.json
+├── main.py            # FastAPI app, organized by concern:
+│                      #   setup -> models -> auth -> agent -> endpoints
+├── database.py        # DB path + schema + get_connection() (FK enforcement)
+├── seed.py            # loads 2 admins + sample DJs/outlets
+├── test_main.py       # pytest (availability guard)
 ├── data/
 │   └── seed-data.json # 30 DJs + 60 outlets
 ├── requirements.txt
-└── ARCHITECTURE.md    # data model + endpoint design notes
+└── ARCHITECTURE.md    # data model, endpoint, agent & auth design notes
 ```
 
 ---
 
 ## Possible improvements
 
-- Add a `pytest` suite (availability guard is the prime candidate for tests)
-- Enforce foreign keys at the DB level (`PRAGMA foreign_keys = ON`) so bookings can't reference a non-existent DJ or outlet
-- Add authentication / authorization (designed but intentionally deferred)
+- A token **refresh** flow so users don't have to re-login every 30 minutes
+- **Conversation memory** for `/chat` (currently each call is stateless)
+- **Confirmation step before destructive agent actions** (delete/cancel): the agent echoes the matched record (name + id) and waits for a "yes", so a name typo can't silently hit the wrong record (builds on conversation memory above)
+- Automated tests for the agent / auth layers (the deterministic guard is covered; the LLM agent isn't)
+- Pagination + filtering on the list endpoints as data grows

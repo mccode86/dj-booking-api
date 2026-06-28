@@ -2,12 +2,14 @@ import bcrypt
 import sqlite3
 import jwt
 import os
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from database import get_connection
+
 
 load_dotenv()
 
@@ -19,49 +21,6 @@ TOKEN_SECRET = os.getenv("JWT_SECRET")
 app = FastAPI()
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
-
-
-def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        payload = jwt.decode(credentials.credentials, TOKEN_SECRET, algorithms=["HS256"])
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return payload
-
-
-def get_optional_admin(credentials: HTTPAuthorizationCredentials = Depends(optional_security)):
-    if credentials is None:
-        return None
-    try:
-        payload = jwt.decode(credentials.credentials, TOKEN_SECRET, algorithms=["HS256"])
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return payload
-
-
-def tools_for_role(role):
-    if role == "admin_dj":
-        allowed = ["book_dj", "get_djs", "get_outlets"]
-    elif role == "admin_outlet":
-        allowed = ["get_djs", "get_outlets"]
-    else:
-        allowed = ["get_djs", "get_outlets"]
-    return [tool for tool in tools if tool["name"] in allowed]
-
-
-
-def require_role(role: str):
-    def checker(admin: dict = Depends(get_current_admin)):
-        if admin["role"] != role:
-            raise HTTPException(status_code=403, detail="Access denied")
-        return admin
-
-    return checker
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
 
 class DJCreate(BaseModel):
@@ -101,7 +60,100 @@ class Login(BaseModel):
     password: str
 
 
+def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, TOKEN_SECRET, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+def get_optional_admin(credentials: HTTPAuthorizationCredentials = Depends(optional_security)):
+    if credentials is None:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, TOKEN_SECRET, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+def require_role(role: str):
+    def checker(admin: dict = Depends(get_current_admin)):
+        if admin["role"] != role:
+            raise HTTPException(status_code=403, detail="Access denied")
+        return admin
+
+    return checker
+
+
 tools = [{
+    "name": "add_dj",
+    "description": "Add a new DJ to the system.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Name of the DJ"
+            },
+            "price": {
+                "type": "integer",
+            }
+        },
+        "required": ["name", "price"]
+    }
+}, {
+    "name": "add_outlet",
+    "description": "Add a new outlet to the system.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Name of the outlet"
+            },
+            "location": {
+                "type": "string",
+                "description": "Location of the outlet"
+            }
+        },
+        "required": ["name", "location"]
+    }
+}, {
+    "name": "update_dj",
+    "description": "Update the price of a DJ.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "dj_id": {
+                "type": "integer",
+                "description": "ID of the DJ"
+            },
+            "price": {
+                "type": "integer",
+            }
+        },
+        "required": ["dj_id", "price"]
+    }
+}, {
+    "name": "update_outlet",
+    "description": "Update the name of an outlet.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "outlet_id": {
+                "type": "integer",
+                "description": "ID of the outlet"
+            },
+            "name": {
+                "type": "string",
+                "description": "New name of the outlet"
+            }
+        },
+        "required": ["outlet_id", "name"]
+    }
+}, {
     "name": "book_dj",
     "description": "Book a DJ for a specific date.",
     "input_schema": {
@@ -123,6 +175,49 @@ tools = [{
         "required": ["dj_id", "outlet_id", "date"]
     }
 }, {
+    "name": "cancel_booking",
+    "description": "Cancel a booking.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "booking_id": {
+                "type": "integer",
+                "description": "ID of the booking"
+            },
+            "cancel_reason": {
+                "type": "string",
+                "description": "Reason for cancellation"
+            }
+        },
+        "required": ["booking_id", "cancel_reason"]
+    }
+}, {
+    "name": "delete_dj",
+    "description": "Delete a DJ by ID.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "dj_id": {
+                "type": "integer",
+                "description": "ID of the DJ"
+            }
+        },
+        "required": ["dj_id"]
+    }
+}, {
+    "name": "delete_outlet",
+    "description": "Delete an outlet by ID.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "outlet_id": {
+                "type": "integer",
+                "description": "ID of the outlet"
+            }
+        },
+        "required": ["outlet_id"]
+    }
+}, {
     "name": "get_djs",
     "description": "Get a list of all DJs.",
     "input_schema": {
@@ -136,18 +231,72 @@ tools = [{
         "type": "object",
         "properties": {}
     }
+}, {
+    "name": "get_bookings",
+    "description": "Get a list of all bookings.",
+    "input_schema": {
+        "type": "object",
+        "properties": {}
+    }
 }]
+
+
+def tools_for_role(role):
+    if role == "admin_dj":
+        allowed = ["get_djs", "get_outlets", "get_bookings", "cancel_booking", "delete_dj", "book_dj", "update_dj",
+                   "add_dj"]
+    elif role == "admin_outlet":
+        allowed = ["get_djs", "get_outlets", "get_bookings", "delete_outlet", "update_outlet", "add_outlet"]
+    else:
+        allowed = ["get_djs", "get_outlets", "get_bookings"]
+    return [tool for tool in tools if tool["name"] in allowed]
+
+
+def run_tool(tool_name, input_data):
+    if tool_name == "get_djs":
+        return get_djs()
+    elif tool_name == "get_outlets":
+        return get_outlets()
+    elif tool_name == "get_bookings":
+        return get_bookings()
+    elif tool_name == "add_dj":
+        return add_dj(DJCreate(**input_data))
+    elif tool_name == "add_outlet":
+        return add_outlet(OutletCreate(**input_data))
+    elif tool_name == "update_dj":
+        return update_dj(input_data["dj_id"], DJUpdate(price=input_data["price"]))
+    elif tool_name == "update_outlet":
+        return update_outlet(input_data["outlet_id"], OutletUpdate(name=input_data["name"]))
+    elif tool_name == "delete_dj":
+        return delete_dj(input_data["dj_id"])
+    elif tool_name == "delete_outlet":
+        return delete_outlet(input_data["outlet_id"])
+    elif tool_name == "book_dj":
+        return book_dj(BookingCreate(**input_data))
+    elif tool_name == "cancel_booking":
+        return cancel_booking(input_data["booking_id"], CancelBooking(cancel_reason=input_data["cancel_reason"]))
+    else:
+        return {"error": "Tool not found"}
 
 
 def run_agent(message, role):
     loop_count = 0
     messages = [{"role": "user", "content": message}]
     agent_tools = tools_for_role(role)
+    system_prompt = f"""You are the assistant for the Holywings DJ booking system.
+    
+Rules:
+- Only use the tools that are available to you. Never claim or pretend you can perform an action if no tool exists for it.
+- If you can't do something, say so honestly, and tell the user what you CAN do instead.
+
+The current user's role is {role}.
+"""
     while True:
         response = client.messages.create(
             model=MODEL,
             max_tokens=2048,
             tools=agent_tools,
+            system=system_prompt,
             messages=messages
         )
 
@@ -171,15 +320,9 @@ def run_agent(message, role):
             return "Sorry, too many loops. Please try again later."
 
 
-def run_tool(tool_name, input_data):
-    if tool_name == "get_djs":
-        return get_djs()
-    elif tool_name == "get_outlets":
-        return get_outlets()
-    elif tool_name == "book_dj":
-        return book_dj(BookingCreate(**input_data))
-    else:
-        return {"error": "Tool not found"}
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.post("/login")
@@ -191,7 +334,7 @@ def login(req: Login):
     admin = cursor.fetchone()
     conn.close()
     if admin and bcrypt.checkpw(req.password.encode(), admin["password"].encode()):
-        payload = {"id": admin["id"], "role": admin["role"]}
+        payload = {"id": admin["id"], "role": admin["role"], "exp": datetime.now(timezone.utc) + timedelta(minutes=30),}
         token = jwt.encode(payload, TOKEN_SECRET, algorithm="HS256")
         return {"token": token}
     raise HTTPException(status_code=401, detail="Invalid credentials")
