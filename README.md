@@ -1,6 +1,6 @@
 # DJ Booking API
 
-A backend REST API for managing DJ bookings across multiple venues, built around a real-world scenario (Holywings): an outlet wants to book a DJ for a specific date, and the system has to make sure that DJ isn't already booked that night.
+A backend REST API for managing DJ bookings across multiple venues, built around a real-world scenario: an outlet wants to book a DJ for a specific date, and the system has to make sure that DJ isn't already booked that night.
 
 Beyond the CRUD booking core, it has two more layers, planned from the start and built in phases:
 
