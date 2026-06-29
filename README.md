@@ -175,6 +175,8 @@ Then open **http://localhost:8000/docs** to explore every endpoint interactively
 pytest
 ```
 
+> The tests run against the seeded database, so create `.env` and run `python seed.py` (steps 3-4) first. The booking test logs in as a seeded admin to reach the role-protected `/bookings` endpoint.
+>
 > The SQLite database (`*.db`) is git-ignored: it's derived data, rebuilt from `database.py` + `seed.py` on first run.
 
 ---
@@ -199,5 +201,5 @@ dj_booking_api/
 ## Possible improvements
 
 - A token **refresh** flow so users don't have to re-login every 30 minutes
-- Automated tests for the agent / auth layers (the deterministic guard is covered; the LLM agent isn't)
+- Dedicated tests for the auth and LLM-agent layers: the availability guard is covered (and now logs in to reach a protected endpoint), but nothing yet targets auth behavior itself (401/403, role mismatch, token expiry) or the non-deterministic agent
 - Pagination + filtering on the list endpoints as data grows
