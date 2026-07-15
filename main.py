@@ -4,6 +4,7 @@ import sqlite3
 import jwt
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -51,6 +52,7 @@ class BookingCreate(BaseModel):
 
 class CancelBooking(BaseModel):
     cancel_reason: str
+    cancelled_by: Literal["dj", "outlet"]
 
 
 class ChatMessage(BaseModel):
@@ -190,9 +192,17 @@ tools = [{
             "cancel_reason": {
                 "type": "string",
                 "description": "Reason for cancellation"
+            },
+            "cancelled_by": {
+                "type": "string",
+                "enum": ["dj", "outlet"],
+                "description": "Who pulled out. Use 'dj' if the DJ cancelled: the DJ broke the contract, so the date "
+                               "stays closed and the DJ cannot be booked anywhere else that day. Use 'outlet' if the "
+                               "outlet cancelled the event: the DJ is still free, so the same date can be re-booked at "
+                               "another outlet. Ask the admin which one it was if the reason does not make it clear."
             }
         },
-        "required": ["booking_id", "cancel_reason"]
+        "required": ["booking_id", "cancel_reason", "cancelled_by"]
     }
 }, {
     "name": "delete_dj",
@@ -277,7 +287,8 @@ def run_tool(tool_name, input_data):
     elif tool_name == "book_dj":
         return book_dj(BookingCreate(**input_data))
     elif tool_name == "cancel_booking":
-        return cancel_booking(input_data["booking_id"], CancelBooking(cancel_reason=input_data["cancel_reason"]))
+        return cancel_booking(input_data["booking_id"], CancelBooking(cancel_reason=input_data["cancel_reason"],
+                                                                      cancelled_by=input_data["cancelled_by"]))
     else:
         return {"error": "Tool not found"}
 
@@ -462,11 +473,15 @@ def delete_outlet(outlet_id: int):
 def book_dj(booking: BookingCreate):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM BOOKING WHERE dj_id = ? AND date = ?", (booking.dj_id, booking.date))
-    book = cursor.fetchall()
-    if book:
+    cursor.execute("SELECT status, cancelled_by FROM BOOKING WHERE dj_id = ? AND date = ?",
+                   (booking.dj_id, booking.date))
+    books = cursor.fetchall()
+    if any(status == "Booked" for status, cancelled_by in books):
         conn.close()
         return {"message": "DJ is already booked on this date"}
+    if any(cancelled_by == "dj" for status, cancelled_by in books):
+        conn.close()
+        return {"message": "DJ cancelled on this date. The date stays closed across all outlets."}
     try:
         cursor.execute("INSERT INTO BOOKING (dj_id, outlet_id, date) VALUES (?, ?, ?)",
                        (booking.dj_id, booking.outlet_id, booking.date))
@@ -494,8 +509,8 @@ def get_bookings():
 def cancel_booking(booking_id: int, booking: CancelBooking):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE BOOKING SET status = 'Cancelled', cancel_reason = ? WHERE id = ?",
-                   (booking.cancel_reason, booking_id))
+    cursor.execute("UPDATE BOOKING SET status = 'Cancelled', cancel_reason = ?, cancelled_by = ? WHERE id = ?",
+                   (booking.cancel_reason, booking.cancelled_by, booking_id))
     if cursor.rowcount == 0:
         conn.close()
         raise HTTPException(status_code=404, detail="Booking not found")

@@ -85,6 +85,7 @@ Same lesson as the `MODEL` constant in the capstone (CAP.4): "works ≠ correct.
 | `date` | the gig date |
 | `status` | `Booked` -> `Done` or `Cancelled` |
 | `cancel_reason` | `NULL` unless `status = Cancelled` |
+| `cancelled_by` | `dj` or `outlet`. `NULL` unless `status = Cancelled`. Decides whether the date frees up. **Which side pulled out, not the caller** - only `admin_dj` can cancel, so the outlet phones in and the admin records it |
 
 *Under the hood - why three tables, not one:*
 - **Entity vs attribute:** `name` / `price` are *facts about a DJ* -> columns in
@@ -112,7 +113,8 @@ Same lesson as the `MODEL` constant in the capstone (CAP.4): "works ≠ correct.
            v
         Booked ------(gig day goes fine)------>  Done
            |
-           `---------(cancelled on the day)---->  Cancelled  (+ cancel_reason)
+           `---------(cancelled on the day)---->  Cancelled  (+ cancel_reason
+                                                              + cancelled_by)
 ```
 
 **Business rules that shaped this (how Holywings actually works):**
@@ -121,9 +123,15 @@ Same lesson as the `MODEL` constant in the capstone (CAP.4): "works ≠ correct.
   system just answers "taken, pick another date."
 - Cancellations *do* happen (missed / delayed flights; rarely illness; outlets
   only for force majeure) and always **on the day (hari-H)**.
-- **A cancelled date does NOT free up** (too late to rebook). So on cancel we
-  **do not delete the row** - we keep it and mark it `Cancelled`. Availability
-  treats a row as "taken" **regardless of status**.
+- **Who cancels decides what happens to the date.** What is really sold is the
+  DJ's **exclusivity** for that date, fixed the moment the contract is signed:
+  - **DJ cancels** -> the DJ broke the contract, so the date is **burnt**. He
+    cannot play that date anywhere, not even at a club that isn't ours.
+  - **Outlet cancels** -> the DJ is still willing and able, so the company
+    **moves him to another one of our outlets**. The date stays **open**.
+- So on cancel we **do not delete the row** - we keep it and mark it `Cancelled`,
+  and we record **`cancelled_by`**, because "is this DJ still available?" cannot
+  be answered from `status` alone.
 - Why keep cancelled rows -> **history & reporting** (how many gigs done, how many
   cancelled, and why). That need is exactly what makes the `status` column earn
   its place - see below.
@@ -182,7 +190,7 @@ needed (**YAGNI**).
 |---|---|---|
 | **Create Booking** ⭐ | write | the star - runs the **availability check** first (see below) |
 | View bookings / calendar | read | a DJ's bookings (frontend greys out the booked dates) |
-| Cancel Booking | write | really an Update: `status = Cancelled` + `cancel_reason`. Row stays. |
+| Cancel Booking | write | really an Update: `status = Cancelled` + `cancel_reason` + `cancelled_by`. Row stays. |
 | Mark Done | write | really an Update: `status = Done`. |
 | ~~hard Delete~~ | - | not needed |
 
@@ -193,9 +201,14 @@ Outlet) or that *is* history (Booking) is **never hard-deleted** - you flip a fl
 
 ### Create Booking - the flow  ✅ built & verified
 Receives `dj_id`, `outlet_id`, `date`. High level:
-1. **Availability check FIRST** - is there already a booking row for this
-   `(dj_id, date)`? (a row of *any* status counts as taken).
-2. If **taken** -> reject; tell the outlet "pick another date" (no row created).
+1. **Availability check FIRST** - pull every booking row for this `(dj_id, date)`
+   and read them in this order:
+   - any row still `Booked` -> **taken** (he is playing somewhere that night).
+   - any row `Cancelled` by the **DJ** -> **burnt** (contract broken; the date is
+     closed for him everywhere, forever).
+   - only rows `Cancelled` by an **outlet** -> **free** (he was let down, not at
+     fault, so we can move him to another one of our outlets).
+2. If **taken** or **burnt** -> reject with the matching message (no row created).
 3. If **free** -> insert the new booking with `status = Booked`.
 
 > This is where the one business rule actually lives. Built & verified: the guard runs

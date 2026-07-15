@@ -18,7 +18,8 @@ Built with **FastAPI + SQLite + Pydantic + Anthropic (Claude) + JWT**. No fronte
 - **DJ management**: create, list, update price, soft-delete
 - **Outlet management**: create, list, update name, soft-delete
 - **Bookings** with an **availability guard**: a DJ can't be double-booked on the same date
-- **Soft-delete / soft-cancel everywhere**: rows are marked inactive/cancelled, never physically removed, so booking history never breaks (a cancelled date stays blocked, mirroring the real "same-day cancellations don't free the slot" rule)
+- **Soft-delete / soft-cancel everywhere**: rows are marked inactive/cancelled, never physically removed, so booking history never breaks
+- **Cancellations know who is at fault**: if the DJ pulls out he breaks his contract and the date is closed for him everywhere; if the outlet cancels the DJ is blameless and can be moved to another outlet on the same date
 - **Seed script**: loads 2 admins, 30 DJs, and 60 outlets for instant test data
 
 **AI agent layer**
@@ -96,8 +97,9 @@ Four tables in one SQLite database:
 | `date` | TEXT | ISO date, e.g. `2026-07-05` |
 | `status` | TEXT | `Booked` (default) or `Cancelled` |
 | `cancel_reason` | TEXT | filled only when cancelled, otherwise `null` |
+| `cancelled_by` | TEXT | `dj` or `outlet`; filled only when cancelled. Which *side* pulled out, not who made the call: cancelling is always done by `admin_dj`. Decides whether the date frees up |
 
-> **Design note:** a DJ's *availability* is never stored as a column. It's **derived** at request time by checking whether a booking row already exists for that DJ on that date: a single source of truth that can't drift out of sync.
+> **Design note:** a DJ's *availability* is never stored as a column. It's **derived** at request time from the booking rows for that DJ on that date: a single source of truth that can't drift out of sync. `cancelled_by` exists because `status` alone can't answer it: a cancelled booking blocks the date when the DJ walked away, but frees it when the outlet did.
 
 ---
 
@@ -120,7 +122,7 @@ Four tables in one SQLite database:
 | `DELETE` | `/outlets/{outlet_id}` | admin_outlet | Soft-delete an outlet (`active = 0`) |
 | `POST` | `/bookings` | admin_dj | Create a booking (**rejected if the DJ is already booked that date**) |
 | `GET` | `/bookings` | public | List all bookings (including cancelled, for full history) |
-| `PUT` | `/bookings/{booking_id}` | admin_dj | Cancel a booking (sets `Cancelled` + records a reason) |
+| `PUT` | `/bookings/{booking_id}` | admin_dj | Cancel a booking (sets `Cancelled` + records a reason and whether the `dj` or the `outlet` pulled out) |
 
 \* `/chat` is open to everyone, but the agent's available tools are filtered by the caller's role, so an anonymous user only gets the read tools.
 
@@ -128,8 +130,9 @@ Four tables in one SQLite database:
 
 ## How it works
 
-- **No double-booking.** Before inserting a booking, the API checks for an existing row matching that `dj_id` + `date`. If one exists, the request is rejected; otherwise the booking is created. The check always runs *before* the insert.
-- **History is permanent.** Nothing is ever hard-deleted. DJs and outlets are soft-deleted (`active = 0`), and bookings are soft-cancelled (`status = 'Cancelled'`). A cancelled booking keeps its row, so the availability check still finds it, and re-booking that DJ on a cancelled date is still rejected, matching the real venue rule.
+- **No double-booking.** Before inserting a booking, the API pulls every existing row for that `dj_id` + `date`. If any is still `Booked`, the request is rejected. The check always runs *before* the insert.
+- **A cancelled date only frees up if the outlet was at fault.** What the company sells is the DJ's exclusivity for a date, locked in when the contract is signed. If the **DJ** pulls out he has broken that contract, so the date is closed for him everywhere: he cannot play it at another outlet, ours or not. If the **outlet** cancels, the DJ is blameless and gets moved to another one of our outlets, so the same date is bookable again. That is why `cancelled_by` is stored: without it the two cases look identical.
+- **History is permanent.** Nothing is ever hard-deleted. DJs and outlets are soft-deleted (`active = 0`), and bookings are soft-cancelled (`status = 'Cancelled'`). A cancelled booking keeps its row, so the availability check can still see what happened and why.
 - **The agent never touches the database directly.** `/chat` only translates language into tool calls; each tool maps to an existing endpoint function. The agent runs in a loop (call a tool, read the result, decide the next step) until it has an answer.
 - **The agent is never a back-door.** The tools handed to the agent are filtered by the caller's role, mirroring the HTTP permissions exactly. A not-logged-in user literally has *no* booking tool, so even if the model "talks" like it booked, the database stays untouched. Security lives in the **tool filter (hard layer)**; the **system prompt (soft layer)** only shapes honest messaging.
 - **The agent remembers the conversation.** Each `/chat` request carries a `conversation_id`; the server keeps that conversation's message history and replays it on the next call, so follow-up questions have context. History is stored per id, so separate conversations never bleed into each other. Send no id on the first message and the server mints one, returned in the response for the client to reuse.

@@ -39,9 +39,15 @@ def init_db():
     date TEXT,
     status TEXT DEFAULT 'Booked',
     cancel_reason TEXT,
+    cancelled_by TEXT,
     FOREIGN KEY (dj_id) REFERENCES DJ(id),
     FOREIGN KEY (outlet_id) REFERENCES OUTLET(id))
     """)
+
+    columns = [column[1] for column in conn.execute("PRAGMA table_info(BOOKING)")]
+    if "cancelled_by" not in columns:
+        conn.execute("ALTER TABLE BOOKING ADD COLUMN cancelled_by TEXT")
+        conn.execute("UPDATE BOOKING SET cancelled_by = 'dj' WHERE status = 'Cancelled'")
 
     conn.commit()
     conn.close()
