@@ -11,6 +11,22 @@ Built with **FastAPI + SQLite + Pydantic + Anthropic (Claude) + JWT**. No fronte
 
 ---
 
+## Live demo
+
+Deployed on Google Cloud Run:
+
+- **API + Swagger UI:** https://dj-booking-api-210763038293.asia-southeast2.run.app/docs
+- **AI agent:** `POST /chat` on the same host
+
+Try it **without logging in**: the `/chat` agent answers in read-only mode (list DJs, check availability, look up bookings), and every `GET` endpoint is public. To try booking and other write actions, log in as a demo admin and click **Authorize** in Swagger:
+
+- DJ admin: `admin.dj@gmail.com` / `dj123`
+- Outlet admin: `admin.outlet@gmail.com` / `outlet123`
+
+> The database is SQLite baked into the container, so writes (new bookings, etc.) reset when the instance recycles; the seeded data (2 admins, 30 DJs, 60 outlets) always comes back.
+
+---
+
 ## Features
 
 **Core booking system**
@@ -168,7 +184,7 @@ Then open **http://localhost:8000/docs** to explore every endpoint interactively
 
 **Trying protected actions / the agent:**
 
-1. `POST /login` with a seeded admin (`hwadmin.dj@gmail.com` or `hwadmin.outlet@gmail.com`, password = whatever you set in `.env`), then copy the returned token.
+1. `POST /login` with a seeded admin (`admin.dj@gmail.com` or `admin.outlet@gmail.com`, password = whatever you set in `.env`), then copy the returned token.
 2. Click **Authorize** in Swagger and paste the token.
 3. Now write endpoints and the role-aware `/chat` agent unlock for that role.
 

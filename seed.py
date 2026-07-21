@@ -24,8 +24,8 @@ cursor = conn.cursor()
 cursor.execute("DELETE FROM DJ")
 cursor.execute("DELETE FROM OUTLET")
 cursor.execute("DELETE FROM ADMIN")
-cursor.execute("INSERT INTO ADMIN (role, email, password) VALUES (?, ?, ?)", ("admin_dj", "hwadmin.dj@gmail.com", hashed_dj.decode()))
-cursor.execute("INSERT INTO ADMIN (role, email, password) VALUES (?, ?, ?)", ("admin_outlet", "hwadmin.outlet@gmail.com", hashed_outlet.decode()))
+cursor.execute("INSERT INTO ADMIN (role, email, password) VALUES (?, ?, ?)", ("admin_dj", "admin.dj@gmail.com", hashed_dj.decode()))
+cursor.execute("INSERT INTO ADMIN (role, email, password) VALUES (?, ?, ?)", ("admin_outlet", "admin.outlet@gmail.com", hashed_outlet.decode()))
 for dj in data["djs"]:
     cursor.execute("INSERT INTO DJ (name, price) VALUES (?, ?)", (dj["name"], dj["price"]))
 for outlet in data["outlets"]:

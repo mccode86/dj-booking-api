@@ -1,0 +1,15 @@
+# What gcloud uploads to Cloud Build. WITHOUT this file gcloud falls back to
+# .gitignore, which excludes *.db and leaves the deployed image with an empty
+# database. Here we KEEP dj_booking.db (the demo seed) but still exclude .env.
+.env
+.venv/
+.git/
+.gitignore
+__pycache__/
+*.pyc
+.pytest_cache/
+test_main.py
+.idea/
+.obsidian/
+.claude/
+.DS_Store
